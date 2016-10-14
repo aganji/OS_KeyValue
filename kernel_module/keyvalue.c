@@ -28,7 +28,13 @@
 //     Skeleton of KeyValue Pseudo Device
 //
 ////////////////////////////////////////////////////////////////////////
-
+//
+//   Authors:  Aakarsh Gopi - agopi
+//	       Anirudh Ganji- aganji
+//   Description:
+//     Fully functional KeyValue Pseudo Device
+//
+////////////////////////////////////////////////////////////////////////
 #include "keyvalue.h"
 
 #include <asm/uaccess.h>
