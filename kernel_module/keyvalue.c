@@ -29,10 +29,8 @@
 //
 ////////////////////////////////////////////////////////////////////////
 //
-//   Authors:  Aakarsh Gopi - agopi
-//	       Anirudh Ganji- aganji
-//   Description:
-//     Fully functional KeyValue Pseudo Device
+//   Team members:      Aakarsh Gopi - agopi
+//                      Anirudh Ganji- aganji
 //
 ////////////////////////////////////////////////////////////////////////
 #include "keyvalue.h"
