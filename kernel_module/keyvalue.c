@@ -28,11 +28,7 @@
 //     Skeleton of KeyValue Pseudo Device
 //
 ////////////////////////////////////////////////////////////////////////
-//
-//   Team members:      Aakarsh Gopi - agopi
-//                      Anirudh Ganji- aganji
-//
-////////////////////////////////////////////////////////////////////////
+
 #include "keyvalue.h"
 
 #include <asm/uaccess.h>
@@ -46,7 +42,20 @@
 #include <linux/moduleparam.h>
 #include <linux/poll.h>
 
-unsigned transaction_id;
+#include <linux/spinlock.h>
+
+unsigned transaction_id=0;
+rwlock_t rw_lock;
+
+struct node{
+    uint64_t key;
+    uint64_t size;
+    char*   data;
+    struct node* next;
+};
+
+struct node *head=NULL;
+
 static void free_callback(void *data)
 {
 }
@@ -54,22 +63,173 @@ static void free_callback(void *data)
 static long keyvalue_get(struct keyvalue_get __user *ukv)
 {
     struct keyvalue_get kv;
+    struct node *temp_node=NULL;
+    uint64_t i=0;
+    char *data_get_kptr = NULL;
+    int status = 0;
+    
+    kv.key = ukv->key;
+    
+    read_lock(&rw_lock);
 
-    return transaction_id++;
+    if (head == NULL){
+        *(ukv->size) = 0;
+        *((char *)(ukv->data)) = '\0';
+    }
+    else
+    {
+        temp_node = head;
+        
+        while(temp_node->key != kv.key && temp_node->next != NULL)
+        {
+            temp_node = temp_node->next;
+        }
+
+        if (temp_node->key == kv.key)
+        {
+            *(ukv->size) = (temp_node->size);
+            data_get_kptr = (char *)ukv->data;
+           
+            for(i=0;i<temp_node->size;i++)
+            {    
+                data_get_kptr[i] = (temp_node->data)[i];
+            }
+            data_get_kptr[i]='\0';
+            status = 1;
+        }
+
+    }
+    read_unlock(&rw_lock);
+
+    if (status == 1)
+        return transaction_id++;
+    else
+        return -1;
 }
 
 static long keyvalue_set(struct keyvalue_set __user *ukv)
 {
     struct keyvalue_set kv;
+    struct node *node_ptr=NULL;
+    struct node *temp_node=NULL;
+    struct node *prev_node=NULL;
+    char *data_set_kptr = NULL;
+    uint64_t i=0;
+    int status=0;
 
-    return transaction_id++;
+    kv.key = ukv->key;
+    kv.size = ukv->size;
+    kv.data = ukv->data;
+    
+    
+    printk(KERN_ALERT "KEY VALUE SET: %llu %llu %s\n",kv.key,kv.size,(char *)kv.data);
+
+    if (data_set_kptr)
+        kfree(data_set_kptr);
+        
+    if (node_ptr)
+        kfree(node_ptr);
+            
+
+    data_set_kptr = (char *)kmalloc((sizeof(char)*kv.size) + 1,GFP_KERNEL);
+    node_ptr = (struct node *)kmalloc(sizeof(struct node),GFP_KERNEL);
+    
+    memset(data_set_kptr,0,(sizeof(char)*kv.size)+1);
+    
+    for(i=0;i<kv.size;i++)
+    {
+        data_set_kptr[i] = ((char *)(kv.data))[i];
+    }
+    data_set_kptr[i]='\0';
+    
+    node_ptr->key = kv.key;
+    node_ptr->size = kv.size;
+    node_ptr->data = (char *)data_set_kptr;
+    node_ptr->next = NULL;
+    
+    write_lock(&rw_lock);
+    if (head == NULL)
+        head = node_ptr;
+    else
+    {
+        temp_node = head;
+        
+        while((temp_node->next != NULL) && (temp_node->key != kv.key))
+        {
+            prev_node = temp_node;
+            temp_node = temp_node->next;    
+        }
+        
+        if (temp_node->key == kv.key && temp_node == head)
+        {
+            node_ptr->next = head->next;
+            head = node_ptr;
+            kfree(temp_node);
+            status = 1;
+        }
+        else if (temp_node->key == kv.key)
+        {
+            prev_node->next = node_ptr;
+            node_ptr->next = temp_node->next;
+            kfree(temp_node);
+            status = 1;
+
+        }
+        else if (temp_node->next == NULL)
+        {    
+            temp_node->next = node_ptr;
+            status = 1;
+        }
+    
+    }
+    write_unlock(&rw_lock);
+    
+    if (status == 1)
+        return transaction_id++;
+    else
+        return -1;
 }
 
 static long keyvalue_delete(struct keyvalue_delete __user *ukv)
 {
     struct keyvalue_delete kv;
+    int status = 0;
+    struct node *temp_node=NULL;
+    struct node *prev_node=NULL;
 
-    return transaction_id++;
+    kv.key = ukv->key;
+
+    if (head == NULL)
+        return status;
+
+    temp_node = head;
+    
+    while(temp_node != NULL)
+    {
+        if (temp_node->key == kv.key && temp_node == head)
+        {
+            head = NULL;
+            kfree(temp_node);
+            status = 1;
+        }
+        else if(temp_node->key == kv.key)
+        {
+            prev_node->next = temp_node->next;
+            kfree(temp_node);
+            status=1;
+        }
+        else
+        {
+            prev_node = temp_node;
+            temp_node = temp_node->next;
+        }
+    }
+
+
+    if (status == 1)
+        return transaction_id++;
+    else
+        return -1;
 }
 
 //Added by Hung-Wei
@@ -105,7 +265,7 @@ static const struct file_operations keyvalue_fops = {
     .owner                = THIS_MODULE,
     .unlocked_ioctl       = keyvalue_ioctl,
     .mmap                 = keyvalue_mmap,
-//    .poll		  = keyvalue_poll,
+//    .poll       = keyvalue_poll,
 };
 
 static struct miscdevice keyvalue_dev = {
@@ -117,9 +277,10 @@ static struct miscdevice keyvalue_dev = {
 static int __init keyvalue_init(void)
 {
     int ret;
-
+    printk(KERN_ALERT "IN KEYVALUE MODULE\n");
     if ((ret = misc_register(&keyvalue_dev)))
         printk(KERN_ERR "Unable to register \"keyvalue\" misc device\n");
+    rwlock_init(&rw_lock);
     return ret;
 }
 
