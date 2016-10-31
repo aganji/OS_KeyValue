@@ -41,6 +41,7 @@
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/poll.h>
+#include <linux/uaccess.h>
 
 #include <linux/spinlock.h>
 
@@ -62,33 +63,35 @@ static void free_callback(void *data)
 
 static long keyvalue_get(struct keyvalue_get __user *ukv)
 {
-    struct keyvalue_get kv;
+    struct keyvalue_get *kv;
     struct node *temp_node=NULL;
     uint64_t i=0;
     char *data_get_kptr = NULL;
     int status = 0;
-    
-    kv.key = ukv->key;
-    
+    kv = (struct keyvalue_get*)kmalloc(sizeof(struct keyvalue_get),GFP_KERNEL);
+    kv->size = (uint64_t*)kmalloc(sizeof(uint64_t),GFP_KERNEL);
+    copy_from_user(&(kv->key),&(ukv->key),sizeof(uint64_t));
+    //kv.key = ukv->key;
+    printk(KERN_ALERT "KEY VALUE GET: %llu %llu %llu %llu %llu %llu\n",kv->key,kv->size,kv->data,ukv->key,ukv->size,ukv->data);
     read_lock(&rw_lock);
 
     if (head == NULL){
-        *(ukv->size) = 0;
-        *((char *)(ukv->data)) = '\0';
+        return -1;
     }
     else
     {
         temp_node = head;
         
-        while(temp_node->key != kv.key && temp_node->next != NULL)
+        while(temp_node->key != kv->key && temp_node->next != NULL)
         {
             temp_node = temp_node->next;
         }
 
-        if (temp_node->key == kv.key)
+        if (temp_node->key == kv->key)
         {
-            *(ukv->size) = (temp_node->size);
-            data_get_kptr = (char *)ukv->data;
+            *(kv->size) = (temp_node->size);
+            kv->data = (char *)kmalloc(sizeof(char)*(temp_node->size+1),GFP_KERNEL);
+            data_get_kptr = (char *)kv->data;
            
             for(i=0;i<temp_node->size;i++)
             {    
@@ -99,10 +102,18 @@ static long keyvalue_get(struct keyvalue_get __user *ukv)
         }
 
     }
+    copy_to_user(ukv->size,kv->size,sizeof(uint64_t));
+    copy_to_user(ukv->data,kv->data,sizeof(char)*(temp_node->size + 1));
+    kfree(kv->size);
+    kfree(kv->data);
     read_unlock(&rw_lock);
 
+    write_lock(&rw_lock);
+    transaction_id++;
+    write_unlock(&rw_lock);
+
     if (status == 1)
-        return transaction_id++;
+        return transaction_id;
     else
         return -1;
 }
@@ -117,12 +128,9 @@ static long keyvalue_set(struct keyvalue_set __user *ukv)
     uint64_t i=0;
     int status=0;
 
-    kv.key = ukv->key;
-    kv.size = ukv->size;
-    kv.data = ukv->data;
+    copy_from_user(&kv,ukv,sizeof(struct keyvalue_set));    
     
-    
-    printk(KERN_ALERT "KEY VALUE SET: %llu %llu %s\n",kv.key,kv.size,(char *)kv.data);
+    printk(KERN_ALERT "KEY VALUE SET 1: %llu %llu %s\n",kv.key,kv.size,(char *)kv.data);
 
     if (data_set_kptr)
         kfree(data_set_kptr);
@@ -131,7 +139,7 @@ static long keyvalue_set(struct keyvalue_set __user *ukv)
         kfree(node_ptr);
             
 
-    data_set_kptr = (char *)kmalloc((sizeof(char)*kv.size) + 1,GFP_KERNEL);
+    data_set_kptr = (char *)kmalloc((sizeof(char)*(kv.size+1)),GFP_KERNEL);
     node_ptr = (struct node *)kmalloc(sizeof(struct node),GFP_KERNEL);
     
     memset(data_set_kptr,0,(sizeof(char)*kv.size)+1);
@@ -182,10 +190,11 @@ static long keyvalue_set(struct keyvalue_set __user *ukv)
         }
     
     }
+    transaction_id++;
     write_unlock(&rw_lock);
     
     if (status == 1)
-        return transaction_id++;
+        return transaction_id;
     else
         return -1;
 }
@@ -197,7 +206,7 @@ static long keyvalue_delete(struct keyvalue_delete __user *ukv)
     struct node *temp_node=NULL;
     struct node *prev_node=NULL;
 
-    kv.key = ukv->key;
+    copy_from_user(&(kv.key),&(ukv->key),sizeof(uint64_t));
 
     if (head == NULL)
         return status;
@@ -226,8 +235,12 @@ static long keyvalue_delete(struct keyvalue_delete __user *ukv)
     }
 
 
+    write_lock(&rw_lock);
+    transaction_id++;
+    write_unlock(&rw_lock);
+
     if (status == 1)
-        return transaction_id++;
+        return transaction_id;
     else
         return -1;
 }
