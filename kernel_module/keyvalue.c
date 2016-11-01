@@ -164,7 +164,10 @@ static long keyvalue_set(struct keyvalue_set __user *ukv)
     
     write_lock(&rw_lock);
     if (head == NULL)
+    {
         head = node_ptr;
+        status = 1;
+    }
     else
     {
         temp_node = head;
