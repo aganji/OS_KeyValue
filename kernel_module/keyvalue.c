@@ -212,7 +212,7 @@ static long keyvalue_delete(struct keyvalue_delete __user *ukv)
         return status;
 
     temp_node = head;
-    
+    write_lock(&rw_lock);
     while(temp_node != NULL)
     {
         if (temp_node->key == kv.key && temp_node == head)
@@ -235,7 +235,7 @@ static long keyvalue_delete(struct keyvalue_delete __user *ukv)
     }
 
 
-    write_lock(&rw_lock);
+    
     transaction_id++;
     write_unlock(&rw_lock);
 
